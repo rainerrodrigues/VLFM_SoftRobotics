@@ -1,42 +1,61 @@
-using Turing, DifferentialEquations, AbstractGPs, Zygote
+# src/LatentForceModel.jl
+module LatentForceModel
 
-# Defining the physical prior (Simplified Soft Robot Segment)
-function soft_arm_dynamics!(du, u, p, t)
-    # p[1] = damping, p[2] = stiffness, f_t = latent force at time t
-    v, x = u[1], u[2]
-    f_t = p[3](t) # The GP evaluated at time t
-    
-    du[1] = -p[1]*v - p[2]*x + f_t  # Acceleration
-    du[2] = v                       # Velocity
-end
+using Turing
+using DifferentialEquations
+using SciMLSensitivity
+using LinearAlgebra
+using ..PhysicsPriors
 
-# Defining the Turing Model
-@model function vlfm_model(times, observations)
-    # Hyperparameters for the physical system
-    damping ~ LogNormal(0.0, 1.0)
-    stiffness ~ LogNormal(0.0, 1.0)
+export build_vlfm_model
+
+# The Turing model infers the unknown physical parameters AND the unmodeled noise
+@model function build_vlfm_model(times, observed_positions, control_inputs)
+    # Priors for unknown physical parameters
+    # Soft robots have highly uncertain stiffness and damping that change over time
+    c ~ LogNormal(log(0.5), 0.1)  # Damping prior
+    k ~ LogNormal(log(2.0), 0.1)  # Stiffness prior
+    m = 1.0                       # Mass is assumed known for model identifiability
     
-    # GP Hyperparameters for the unknown dynamics (e.g., unmodeled friction/viscoelasticity)
-    variance ~ InverseGamma(2, 3)
-    lengthscale ~ InverseGamma(2, 3)
+    p_vec = [m, c, k]
+
+    # Prior for the unmodeled disturbances/sensor noise
+    obs_noise ~ InverseGamma(2, 3)
+
+    # Setting up the continuous-time Forward Pass
+    u0 = [observed_positions[1], 0.0] # Initial state: [position, velocity]
     
-    # Defining the GP prior
-    kernel = variance * SqExponentialKernel() ∘ ScaleTransform(1.0 / lengthscale)
-    f_gp ~ GP(kernel)
+    function step_dynamics(u_state, p, t)
+        mass, damp, stiff = p
+        x, v = u_state[1], u_state[2]
+        
+        # Matching the current time 't' to the correct control input
+        idx = min(searchsortedlast(times, t), length(control_inputs))
+        idx = max(1, idx)
+        u_ctrl = control_inputs[idx]
+        
+        dx = v
+        # Nominal Physics + Learned Parameters
+        dv = (u_ctrl - damp*v - stiff*x - 0.1*stiff*x^3) / mass
+        return [dx, dv]
+    end
+
+    prob = ODEProblem(step_dynamics, u0, (times[1], times[end]), p_vec)
     
-    # Setup ODE with the sampled GP as the forcing function
-    u0 = [0.0, 0.0]
-    tspan = (minimum(times), maximum(times))
-    p = [damping, stiffness, t -> f_gp(t)]
-    
-    prob = ODEProblem(soft_arm_dynamics!, u0, tspan, p)
-    
-    # Defining the ODE solver with Zygote-compatible sensitivity (ForwardDiff/ReverseDiff)
+    # Solving the ODE (Zygote-compatible)
     sol = solve(prob, Tsit5(), saveat=times, sensealg=InterpolatingAdjoint(autojacvec=ZygoteVJP()))
     
-    # Defining the likelihood of observations given the solved ODE states
-    sigma_obs ~ HalfNormal(0.1)
-    for i in 1:length(times)
-        observations[i] ~ Normal(sol.u[i][2], sigma_obs)
+    # Conditioning the model on real-world observations (The Likelihood)
+    if sol.retcode == ReturnCode.Success && length(sol.u) == length(times)
+        for i in 1:length(times)
+            # We observe the position (index 1 of the state vector)
+            predicted_pos = sol.u[i][1]
+            observed_positions[i] ~ Normal(predicted_pos, obs_noise)
+        end
+    else
+        # Rejecting mathematically impossible trajectories that break the ODE solver
+        Turing.@addlogprob! -Inf
     end
 end
+
+end 
