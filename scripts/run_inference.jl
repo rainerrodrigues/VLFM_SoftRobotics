@@ -28,34 +28,44 @@ model = build_vlfm_model(times, observed_positions, control_inputs)
 # target_acceptance: 0.80 or 0.85 is more robust for SciML models
 # n_adapts: Ensure the sampler has enough time to learn the geometry
 println("Starting NUTS sampling. This will take a moment to compile gradients...")
-chain = sample(model, NUTS(100,0.65), MCMCThreads(), 200, 4)
+chain = sample(model, NUTS(500, 0.8), 1000)
 
 # Saving and Interpret the Results
 println("\n--- Inference Complete ---")
 display(chain) # Prints the statistical summary to the terminal
 
-# Generating the trace and density plots
-println("Generating posterior plots...")
-using Plots.PlotMeasures # Required for margin adjustments
+using Plots.PlotMeasures
 default(
-    fontfamily="Computer Modern", # The standard LaTeX font
+    fontfamily="Computer Modern", 
     grid=true, 
-    gridalpha=0.2,                # Makes the grid lines subtle
-    framestyle=:box               # Encloses the plots in a neat box
+    gridalpha=0.2,                
+    framestyle=:box,
+    linewidth=1.5,
+    titlefontsize=14,  # Larger text for better readability in print
+    guidefontsize=12,
+    tickfontsize=10
 )
 
-posterior_plot = plot(chain,
-    size=(900, 700),              # Larger, cleaner aspect ratio
-    dpi=300,                      # 300 DPI is the minimum for journal printing
-    linewidth=1.5,                # Slightly thicker lines for the trace plots
-    titlefontsize=12,
-    guidefontsize=11,
-    tickfontsize=9,
-    margin=4Plots.mm,             # Adds breathing room between the subplots so text doesn't overlap
-    left_margin=8Plots.mm         # Extra room on the left so Y-axis labels aren't cut off
+# Creating FIGURE A: The Physical Parameters
+println("Generating Figure A (Physics)...")
+physics_chain = final_chain[["c", "k"]]
+plot_physics = plot(physics_chain,
+    size=(800, 500), # Very spacious for just 2 rows
+    margin=8Plots.mm,
+    left_margin=12Plots.mm
 )
+savefig(plot_physics, "figure_A_physics_posterior.pdf")
+savefig(plot_physics, "figure_A_physics_posterior.png")
 
-# Saving the plot to your directory for inclusion in your LaTeX document
-savefig(posterior_plot, "posterior_distributions.png")
-savefig(posterior_plot, "posterior_distributions.pdf")
-println("Saved publication graph as 'posterior_distributions.png'.")
+# Creating FIGURE B: The GP Hyperparameters
+println("Generating Figure B (Hyperparameters)...")
+gp_chain = final_chain[["ℓ", "σ_gp", "obs_noise"]]
+plot_gp = plot(gp_chain,
+    size=(800, 750), # Spacious for 3 rows
+    margin=8Plots.mm,
+    left_margin=12Plots.mm
+)
+savefig(plot_gp, "figure_B_GP_posterior.pdf")
+savefig(plot_gp, "figure_B_GP_posterior.png")
+
+println("Done! Check 'figure_A' and 'figure_B' in your folder.")
