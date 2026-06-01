@@ -1,5 +1,7 @@
 # VLFM_SoftRobotics
 
+* [Download the Full Research Paper (PDF)](docs/VLFM_Theoretical_Framework.pdf)
+
 **Continuous-Time Variational Latent Force Modeling for Real-Time Adaptive Control of Soft and Deformable Robots**
 
 This repository contains the official Julia implementation for the paper *"Continuous-Time Variational Latent Force Modeling for Real-Time Adaptive Control of Soft and Deformable Robots"* by Rainer Rodrigues [1].
